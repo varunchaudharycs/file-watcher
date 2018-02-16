@@ -18,14 +18,17 @@ import org.apache.hadoop.fs.FileSystem
 import org.apache.hadoop.fs.Path
 import org.apache.commons.io.IOUtils
 
-
+import java.util.Calendar
+import scala.collection.JavaConversions._
+import java.util
+import scala.collection.JavaConversions._
 object test
 {
   // GLOBAL VARIABLES
   val dir = "/home/infoobjects/Desktop/filewatcher/"
   val hdir = "/input/filewatcher/"
   var filelist = mutable.Map[String, ListBuffer[String]]()
-
+  filelist = mutable.Map("1" -> ListBuffer("10", "100"), "2" -> ListBuffer("20"))
   val start = "/usr/local/hadoop/sbin/start-all.sh"
 
   var file: String = "file.txt" // FILE NAME
@@ -37,13 +40,22 @@ object test
   // ---------------------- MAIN METHOD ----------------------
   def main(args: Array[String]): Unit =
   {
-    val hadoopConf = new Configuration()
-    val hdfs = FileSystem.get(new URI("hdfs://localhost:9000"), hadoopConf)
+    var yess : String = ""
 
-    val srcPath = new Path("/home/infoobjects/Desktop/file.txt")
-    val destPath = new Path("/input/filewatcher")
+    for (entry <- filelist.entrySet)
+    {
+      val key = entry.getKey
+      val value = entry.getValue
 
-    hdfs.copyFromLocalFile(srcPath, destPath)
+      for (aString <- value)
+      {
+        System.out.println("key : " + key + " value : " + aString)
+        if(aString.equals("20"))
+          yess = key
+      }
+    }
+    println(yess)
+
 
   }
 
