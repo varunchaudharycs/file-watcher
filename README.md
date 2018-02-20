@@ -32,3 +32,7 @@ Covers various corner cases such as:
 9. 'Overflow' condition
 
 ***To be continued ...***
+1. Using Kafka for handling events
+2. Using spark-streaming on 'Consumer's' end 
+3. Maintaining a hive table
+4. Using oozie to schedule a job
