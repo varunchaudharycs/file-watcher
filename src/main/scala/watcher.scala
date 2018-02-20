@@ -1,18 +1,18 @@
-import java.nio.file._
 import java.io._
 import java.net.URI
 import java.security._
+import java.nio.file._
 import java.util.Calendar
 
+import scala.io._
+import scala.collection._
 import scala.sys.process._
 import scala.collection.JavaConverters._
-import scala.collection._
-import scala.io._
-import scala.collection.mutable.ListBuffer
-import scala.collection.JavaConversions._
-import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.fs.FileSystem
+import scala.collection.mutable.ArrayBuffer
+
 import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.FileSystem
+import org.apache.hadoop.conf.Configuration
 
 import util.control.Breaks._
 
@@ -21,14 +21,14 @@ object watcher
   // GLOBAL VARIABLES
   val dir = "/home/infoobjects/Desktop/filewatcher/"
   val hdir = "/input/filewatcher/"
-  var filelist = mutable.Map[String, ListBuffer[String]]()
+  var trailerinfo = mutable.Map[String, ArrayBuffer[String]]()
 
   val start = "/usr/local/hadoop/sbin/start-all.sh"
 
   var file : String = ""    // FILE NAME
-  var id : String = ""      // HASH VALUE
+  var hash : String = ""      // HASH VALUE
+  var oldhash : String = ""   // FOR MODIFY EVENT FOLLOWING CREATE(unnecessary)
   var modified : Boolean = false
-  var nonreadable : Boolean = false
 
   println("STARTING HADOOP SERVICES ...\n")
   start.!
@@ -45,17 +45,11 @@ object watcher
   // CHECK IF DIRECTORY ALREADY CONTAINS FILES
   var startup : Boolean = true
 
+  // UPDATING FILE LIST && COVERING MISSING OPERATIONS
   if (!listing.isEmpty)
-  {
     for (i <- listing)
-    {
       if (!i.endsWith(".tlr") && i.charAt(0) != '.' && i(i.length() - 1) != '~')
-      {
         create(i)
-        backupHDFS(i)
-      }
-    }
-  }
 
   startup = false
 
@@ -71,7 +65,7 @@ object watcher
       val watchService = path.getFileSystem().newWatchService()
 
       // REGISTERING PATH WITH KINDS OF EVENTS
-      path.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_DELETE)
+      path.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_DELETE, StandardWatchEventKinds.ENTRY_MODIFY)
 
       while (true)
       {
@@ -79,7 +73,10 @@ object watcher
         val watchKey = watchService.take()
 
         // CALLING METHOD TO IMPLEMENT EVENT ORIENTED TASKS
-        watchKey.pollEvents().asScala.foreach( e => { startup = false; printEvent(e) })
+        watchKey.pollEvents().asScala.foreach( e =>
+        {
+          printEvent(e)
+        })
 
         // CHECK FOR CLOSED WATCH SERVICE [or closing of thread(if!)]
         if (!watchKey.reset())
@@ -125,35 +122,40 @@ object watcher
       // CREATE || MODIFY
       if(kind.equals(StandardWatchEventKinds.ENTRY_CREATE))
       {
-        id = hashValue(file)
-        // CHECK IF MODIFY (HASH VALUE OF UNMODIFIED FILE)
-        var oldhash = getHash(file)
+        println("Entry CREATED: " + file)
 
-        if(oldhash.length == 0)
-          create(file)
-        else
-        {
-            // LOG
-            logwriter.write(Calendar.getInstance().getTime + " -> " + "FILE: " + file + " - MODIFIED\n")
-            logwriter.flush()
+        hash = hashValue(file)
 
-            modified = true
+        create(file)
 
-            delete(file, oldhash)
-            create(file)
-
-            modified = false
-        }
-
+        // CHECK UNNECESSARY MODIFY EVENT FOR CREATED FILE
+        oldhash = hash
       }
       // DELETE
       else if(kind.equals(StandardWatchEventKinds.ENTRY_DELETE))
       {
         println("Entry DELETED: " + file)
 
-        id = getHash(file)
+        delete(file)
+      }
+      else if(kind.equals(StandardWatchEventKinds.ENTRY_MODIFY))
+      {
+        // CHECK UNNECESSARY MODIFY EVENT FOR CREATED FILE
+        if(!hashValue(file).equals(oldhash))
+        {
+          println("Entry MODIFIED: " + file)
 
-        delete(file, id)
+          logwriter.write(Calendar.getInstance().getTime + " -> " + "FILE: " + file + " - MODIFIED\n")
+          logwriter.flush()
+
+          modified = true
+
+          delete(file)
+
+          create(file)
+
+          modified = false
+        }
       }
 
     } // FILE HANDLED
@@ -161,119 +163,117 @@ object watcher
   } // PRINT EVENT METHOD ENDS
 
   // ---------------------- DELETE ----------------------
-  def delete(file : String, id : String)
+  def delete(file : String)
   {
-    // DELETE FILE NAME FROM LIST
-    filelist(id) --= ListBuffer(file)
-
-    // CHECK IF NO FILES EXIST WITH SAME HASH
-    if(filelist(id).isEmpty)
-      filelist.remove(id)
-
-    // DELETE TRAILER FILE
-    new File(dir + file + ".tlr").delete()
-
-    // CHANGE DIRECTORY IN HDFS -> backup (FILE && TRAILER)
-    val hadoopConf = new Configuration()
-    val hdfs = FileSystem.get(new URI("hdfs://localhost:9000"), hadoopConf)
-
-    hdfs.rename(new Path(hdir + file), new Path(dir + "backup/"))
-    hdfs.rename(new Path(hdir + file + ".tlr"), new Path(dir + "backup/"))
-
-
-    // UPDATE LOG (IF NOT MODIFIED)
     if(!modified)
     {
+      // LOG
       logwriter.write(Calendar.getInstance().getTime + " -> " + "FILE: " + file + " - DELETED\n")
       logwriter.flush()
     }
+
+    // CHANGE DIRECTORY IN HDFS -> backup/ (FILE && TRAILER)
+    val hadoopConf = new Configuration()
+    val hdfs = FileSystem.get(new URI("hdfs://localhost:9000"), hadoopConf)
+
+    // CHECK IF FILE & TRAILER EXISTS IN BACKUP (to ADD || REPLACE)
+    val fileHDFSpath = new org.apache.hadoop.fs.Path("/input/filewatcher/backup/" + file)
+    val trailerHDFSpath = new org.apache.hadoop.fs.Path("/input/filewatcher/backup/" + file + ".tlr")
+
+    // DELETE FILE to REPLACE
+    if(hdfs.exists(fileHDFSpath))
+      hdfs.delete(fileHDFSpath, true)
+
+    // DELETE TRAILER (Local + HDFS) to REPLACE
+    if(hdfs.exists(trailerHDFSpath))
+      hdfs.delete(trailerHDFSpath, true)
+
+    if(Files.exists(Paths.get(dir + file + ".tlr")))
+    {
+      new File(dir + file + ".tlr").delete()
+      hdfs.rename(new org.apache.hadoop.fs.Path(hdir + file + ".tlr"), new org.apache.hadoop.fs.Path(hdir + "backup/" + file + ".tlr"))
+    }
+
+    println(hdir + file)
+
+    // MOVE TO backup/
+    hdfs.rename(new org.apache.hadoop.fs.Path(hdir + file), new org.apache.hadoop.fs.Path(hdir + "backup/" + file))
 
   } // DELETE ENDS
 
   // ---------------------- CREATE ----------------------
   def create(file : String)
   {
+    // CHECKING FOR STARTUP UPDATE FOR LOGGING
+    if(!startup && !modified)
+    {
+      logwriter.write(Calendar.getInstance().getTime + " -> " + "FILE: " + file + " - CREATED \n")
+      logwriter.flush()
+    }
 
     if(Files.probeContentType(new File(dir + file).toPath()).equals("text/plain"))
     {
-      if(id.equals(""))
-      {
-        hashValue(file)
-      }
-
+      // CHECK - EMPTY FILE
       if(new File(dir + file).length() == 0)
       {
-        println("Empty File - No trailer file created")
+        // LOG
+        logwriter.write("EMPTY FILE - NO TRAILER CREATED \n")
+        logwriter.flush()
 
         // HDFS BACKUP
-        backupHDFS(file)
+        backupHDFS(file, false)
       }
       else
       {
         // CHECK FOR DUPLICATE
-        if(filelist.contains(id))
+        if(trailerinfo.contains(hash))
         {
-
-          println("FILE WAS A DUPLICATE")
+          // LOG
+          logwriter.write("DUPLICATE FILE \n")
+          logwriter.flush()
 
           // CHECK FOR TRAILER
           if(!Files.exists(Paths.get(dir + file + ".tlr")))
           {
-            var f : File = new File(dir + file + ".tlr")
+            writer = new PrintWriter(new FileOutputStream(new File(dir + file + ".tlr"), true))
 
-            // COPY TRAILER FILE (DUPLICATE)
-            Files.copy(Paths.get(dir + filelist(id).head + ".tlr"), Paths.get(dir + file + ".tlr"))
+            // WRITE CONTENTS OF TRAILER FILE FROM TRAILER INFO
+            writer.write("Hash: " + hash + "\n")
+            writer.write("Number of lines: " + trailerinfo(hash)(0) + "\n")
+            writer.write("Highest frequency word: " + trailerinfo(hash)(1) + "\n")
+            writer.flush()
           }
 
-          // ADD FILE TO LIST
-          filelist(id) ++= ListBuffer(file)
-
-          backupHDFS(file)
+          // HDFS BACKUP
+          backupHDFS(file, true)
 
         }
         // ORIGINAL FILE
         else
-        {
           // CHECK FOR TRAILER
           if (!Files.exists(Paths.get(dir + file + ".tlr")))
           {
-            println("sup?")
-
             // CREATING TRAILER FILE (ORIGINAL)
             writer = new PrintWriter(new FileOutputStream(new File(dir + file + ".tlr"), true))
 
             // TRAILER FILE OPERATIONS
-            writer.write("Hash value = " + id)
+            writer.write("Hash = " + hash + "\n")
             writer.flush()
 
             numberOfLines(file)
             highestFrequencyWord(file)
-            backupHDFS(file)
+            backupHDFS(file, true)
 
             writer.close()
           }
-        }
-        // ADDING TO LIST
-        filelist += id -> ListBuffer(file)
-
       }
     }
     // NON-READABLE FILE
     else
     {
-      println("FILE IS NON-READABLE")
+      println("FILE IS NOT READABLE")
 
-      // HDFS BACKUP
-      nonreadable = true
-      backupHDFS(file)
-      nonreadable = false
-    }
-
-    // CHECKING FOR STARTUP UPDATE + MODIFIED
-    if(!startup && !modified)
-    {
-      logwriter.write(Calendar.getInstance().getTime + " -> " + "FILE: " + file + " - CREATED\n")
-      logwriter.flush()
+      backupHDFS(file, false)
     }
 
   } // CREATE ENDS
@@ -296,60 +296,53 @@ object watcher
       dis.close()
     }
 
-    id = sha.digest.map("%02x".format(_)).mkString
+    hash = sha.digest.map("%02x".format(_)).mkString
 
-    return id
+    return hash
 
   } // HASH VALUE METHOD ENDS
 
   // ---------------------- NUMBER OF LINES ----------------------
   def numberOfLines(file : String)
   {
-    writer.write("\nNumber of lines = " + Source.fromFile(dir + file).getLines.size);
+    var lines = Source.fromFile(dir + file).getLines.size
+
+    writer.write("Number of lines = " + lines + "\n");
     writer.flush()
+
+    // ADD TO MAP
+    trailerinfo += hash -> ArrayBuffer(lines.toString)
 
   } // NUMBER OF LINES METHOD ENDS
 
   // ---------------------- HIGHEST FREQUENCY WORD ----------------------
   def highestFrequencyWord(file : String)
   {
-
-    writer.write("\nHighest frequency word = " + Source.fromFile(new File(dir + file)).getLines.flatMap(_.split("\\W+")).foldLeft(Map.empty[String, Int])
+    var word = Source.fromFile(new File(dir + file)).getLines.flatMap(_.split("\\W+")).foldLeft(Map.empty[String, Int])
     {
       (count, word) => count + (word -> (count.getOrElse(word, 0) + 1))
-    }.toSeq.sortWith(_._2 > _._2).head._1)
+    }.toSeq.sortWith(_._2 > _._2).head._1
+
+    writer.write("Highest frequency word = " + word + "\n")
 
     writer.flush()
+
+    // ADD TO MAP
+    trailerinfo(hash) += word
 
   } // HIGHEST FREQUENCY METHOD ENDS
 
   // ---------------------- HDFS BACKUP ----------------------
-  def backupHDFS(file : String)
+  def backupHDFS(file : String, trailercreated : Boolean)
   {
     val hadoopConf = new Configuration()
     val hdfs = FileSystem.get(new URI("hdfs://localhost:9000"), hadoopConf)
 
     hdfs.copyFromLocalFile(new Path(dir + file), new Path(hdir))
 
-    if(!nonreadable)
+    if(trailercreated)
       hdfs.copyFromLocalFile(new Path(dir + file + ".tlr"), new Path(hdir))
-
 
   } // HDFS BACKUP METHOD ENDS
 
-  // ---------------------- OLD HASH ----------------------
-  def getHash(file : String) : String =
-  {
-    for (entry <- filelist.entrySet)
-    {
-      val key = entry.getKey
-      val value = entry.getValue
-
-      for (filelistvalues <- value)
-        if (filelistvalues.equals(file))
-          return key
-    } // OUTER FOR
-
-    return ""
-  }
 }

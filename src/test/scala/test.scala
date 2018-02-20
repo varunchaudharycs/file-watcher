@@ -6,9 +6,12 @@ import java.security._
 import scala.sys.process._
 import scala.collection.JavaConverters._
 import scala.collection._
+import scala.collection.mutable.ArrayBuffer
 import scala.io._
 import scala.collection.mutable.ListBuffer
 import java.net._
+
+import watcher.{dir, hdir}
 
 import util.control.Breaks._
 
@@ -27,8 +30,8 @@ object test
   // GLOBAL VARIABLES
   val dir = "/home/infoobjects/Desktop/filewatcher/"
   val hdir = "/input/filewatcher/"
-  var filelist = mutable.Map[String, ListBuffer[String]]()
-  filelist = mutable.Map("1" -> ListBuffer("10", "100"), "2" -> ListBuffer("20"))
+  var filelist = mutable.Map[String, ArrayBuffer[String]]()
+  filelist = mutable.Map("1" -> ArrayBuffer("10"), "2" -> ArrayBuffer("20"))
   val start = "/usr/local/hadoop/sbin/start-all.sh"
 
   var file: String = "file.txt" // FILE NAME
@@ -40,23 +43,11 @@ object test
   // ---------------------- MAIN METHOD ----------------------
   def main(args: Array[String]): Unit =
   {
-    var yess : String = ""
 
-    for (entry <- filelist.entrySet)
-    {
-      val key = entry.getKey
-      val value = entry.getValue
+    val hadoopConf = new Configuration()
+    val hdfs = FileSystem.get(new URI("hdfs://localhost:9000"), hadoopConf)
 
-      for (aString <- value)
-      {
-        System.out.println("key : " + key + " value : " + aString)
-        if(aString.equals("20"))
-          yess = key
-      }
-    }
-    println(yess)
-
+    hdfs.rename(new org.apache.hadoop.fs.Path("/input/filewatcher/file.txt"), new org.apache.hadoop.fs.Path("/input/filewatcher/backup/file.txt"))
 
   }
-
 }
