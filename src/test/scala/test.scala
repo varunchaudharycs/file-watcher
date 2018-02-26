@@ -11,9 +11,12 @@ import scala.io._
 import scala.collection.mutable.ListBuffer
 import java.net._
 
+import org.apache.spark.streaming.StreamingContext._
+import org.apache.spark.streaming.{Duration, Seconds, StreamingContext}
+import org.apache.spark._
+import org.apache.spark.SparkContext._
 import watcher.{dir, hdir}
-
-import util.control.Breaks._
+//import util.control.Breaks._
 
 // NOT WORKING !!!
 import org.apache.hadoop.conf.Configuration
@@ -25,6 +28,7 @@ import java.util.Calendar
 import scala.collection.JavaConversions._
 import java.util
 import scala.collection.JavaConversions._
+
 object test
 {
   // GLOBAL VARIABLES
@@ -43,11 +47,6 @@ object test
   // ---------------------- MAIN METHOD ----------------------
   def main(args: Array[String]): Unit =
   {
-
-    val hadoopConf = new Configuration()
-    val hdfs = FileSystem.get(new URI("hdfs://localhost:9000"), hadoopConf)
-
-    hdfs.rename(new org.apache.hadoop.fs.Path("/input/filewatcher/file.txt"), new org.apache.hadoop.fs.Path("/input/filewatcher/backup/file.txt"))
 
   }
 }

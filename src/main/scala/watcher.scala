@@ -16,6 +16,10 @@ import org.apache.hadoop.conf.Configuration
 
 import util.control.Breaks._
 
+import org.apache.spark._
+import org.apache.spark.SparkContext
+// import org.apache.spark.SparkContext._
+
 object watcher
 {
   // GLOBAL VARIABLES
@@ -37,13 +41,16 @@ object watcher
   var logwriter : PrintWriter = new PrintWriter(new FileOutputStream(new File("/home/infoobjects/Desktop/logs.txt"),true))
 
   // TRAILER FILE
-  var writer : PrintWriter = null
+  var writer : PrintWriter = _
 
   // UPDATING FILE LIST
   var listing : Array[String] = new File(dir).list
 
   // CHECK IF DIRECTORY ALREADY CONTAINS FILES
   var startup : Boolean = true
+
+  // SPARK CONTEXT
+  val sc = new SparkContext(new SparkConf().setMaster("local[4]").setAppName("File Watcher"))
 
   // UPDATING FILE LIST && COVERING MISSING OPERATIONS
   if (!listing.isEmpty)
@@ -124,7 +131,7 @@ object watcher
       {
         println("Entry CREATED: " + file)
 
-        hash = hashValue(file)
+        hashValue(file)
 
         create(file)
 
@@ -140,8 +147,9 @@ object watcher
       }
       else if(kind.equals(StandardWatchEventKinds.ENTRY_MODIFY))
       {
+        hashValue(file)
         // CHECK UNNECESSARY MODIFY EVENT FOR CREATED FILE
-        if(!hashValue(file).equals(oldhash))
+        if(!hash.equals(oldhash))
         {
           println("Entry MODIFIED: " + file)
 
@@ -253,6 +261,9 @@ object watcher
           // CHECK FOR TRAILER
           if (!Files.exists(Paths.get(dir + file + ".tlr")))
           {
+            // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
             // CREATING TRAILER FILE (ORIGINAL)
             writer = new PrintWriter(new FileOutputStream(new File(dir + file + ".tlr"), true))
 
@@ -279,7 +290,7 @@ object watcher
   } // CREATE ENDS
 
   // ---------------------- HASH VALUE ----------------------
-  def hashValue(file : String) : String =
+  def hashValue(file : String)
   {
     val buffer = new Array[Byte](8192)
     val sha = MessageDigest.getInstance("SHA-1")
@@ -298,14 +309,12 @@ object watcher
 
     hash = sha.digest.map("%02x".format(_)).mkString
 
-    return hash
-
   } // HASH VALUE METHOD ENDS
 
   // ---------------------- NUMBER OF LINES ----------------------
   def numberOfLines(file : String)
   {
-    var lines = Source.fromFile(dir + file).getLines.size
+    val lines = sc.textFile(dir + file).count()
 
     writer.write("Number of lines = " + lines + "\n");
     writer.flush()
@@ -318,10 +327,9 @@ object watcher
   // ---------------------- HIGHEST FREQUENCY WORD ----------------------
   def highestFrequencyWord(file : String)
   {
-    var word = Source.fromFile(new File(dir + file)).getLines.flatMap(_.split("\\W+")).foldLeft(Map.empty[String, Int])
-    {
-      (count, word) => count + (word -> (count.getOrElse(word, 0) + 1))
-    }.toSeq.sortWith(_._2 > _._2).head._1
+
+    var word = sc.textFile(dir + file).flatMap(lines => lines.split("[ ,!.;]+").map(words => (words,1)))
+      .reduceByKey(_ + _).map(words => words.swap).sortByKey(false, 1).first()._2
 
     writer.write("Highest frequency word = " + word + "\n")
 
