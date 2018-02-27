@@ -47,6 +47,24 @@ object test
   // ---------------------- MAIN METHOD ----------------------
   def main(args: Array[String]): Unit =
   {
+    val sc = new SparkContext(new SparkConf().setAppName("test").setMaster("local[4]"))
+    val buffer = new Array[Byte](8192)
+    val sha = MessageDigest.getInstance("SHA-1")
+    val dis = new DigestInputStream( new FileInputStream(sc.textFile("/home/infoobjects/Desktop/file.txt").toString()), sha)
 
+    // TO READ FILE IN CHUNKS SO ENTIRE CONTENT IS NOT HELD IN MEMORY(=> FASTER)
+    try
+    {
+      while(dis.read(buffer) != -1) {}
+    }
+
+    finally
+    {
+      dis.close()
+    }
+
+    println("\n \n \n *********************************************************************************")
+    println(sha.digest.map("%02x".format(_)).mkString)
+    println("\n \n \n *********************************************************************************")
   }
 }

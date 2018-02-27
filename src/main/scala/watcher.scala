@@ -9,13 +9,11 @@ import scala.collection._
 import scala.sys.process._
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
-
 import org.apache.hadoop.fs.Path
 import org.apache.hadoop.fs.FileSystem
 import org.apache.hadoop.conf.Configuration
 
 import util.control.Breaks._
-
 import org.apache.spark._
 import org.apache.spark.SparkContext
 // import org.apache.spark.SparkContext._
@@ -294,7 +292,7 @@ object watcher
   {
     val buffer = new Array[Byte](8192)
     val sha = MessageDigest.getInstance("SHA-1")
-    val dis = new DigestInputStream(new FileInputStream(new File(dir + file)), sha)
+    val dis = new DigestInputStream( new FileInputStream(new File(dir + file)), sha)
 
     // TO READ FILE IN CHUNKS SO ENTIRE CONTENT IS NOT HELD IN MEMORY(=> FASTER)
     try
