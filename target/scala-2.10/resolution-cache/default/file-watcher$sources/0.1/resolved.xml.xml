@@ -4,7 +4,7 @@
 		module="file-watcher$sources"
 		revision="0.1"
 		status="integration"
-		publication="20180226171143"
+		publication="20180227121307"
 	/>
 	<configurations>
 		<conf name="compile" visibility="public" description=""/>

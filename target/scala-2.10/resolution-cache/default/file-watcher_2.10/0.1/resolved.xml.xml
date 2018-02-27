@@ -4,7 +4,7 @@
 		module="file-watcher_2.10"
 		revision="0.1"
 		status="integration"
-		publication="20180226170824"
+		publication="20180227121250"
 	>
 		<description>
 		file-watcher
